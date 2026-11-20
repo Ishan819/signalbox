@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+.signal_cache.json
+*.mbox
+me.json
+slack.json
+demo_inbox.json

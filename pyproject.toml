@@ -1,0 +1,19 @@
+[project]
+name = "signalbox"
+version = "0.1.0"
+description = "Find the few messages that actually need you in an inbox full of bots and AI agents."
+requires-python = ">=3.10"
+dependencies = []            # stdlib only; LLMs are called over plain HTTPS
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+signalbox = "signalbox.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["signalbox"]
