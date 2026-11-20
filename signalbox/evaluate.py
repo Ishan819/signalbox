@@ -1,0 +1,54 @@
+"""Measure triage quality on labeled messages, and compare signal combinations (ablation)."""
+from __future__ import annotations
+
+from .models import Identity, Message
+from .scorer import MODES, NEEDS_YOU, Triager
+
+
+def metrics(ranked_labels: list[bool], flagged: list[bool], ks=(2, 5, 10)) -> dict:
+    total = sum(ranked_labels)
+    out: dict = {"positives": total, "messages": len(ranked_labels)}
+    for k in ks:
+        top = ranked_labels[:k]
+        out[f"p@{k}"] = sum(top) / k
+        out[f"r@{k}"] = sum(top) / total if total else 0.0
+    # average precision: rewards putting every important message near the top
+    hits, ap = 0, 0.0
+    for i, lab in enumerate(ranked_labels, 1):
+        if lab:
+            hits += 1
+            ap += hits / i
+    out["avg_precision"] = ap / total if total else 0.0
+    tp = sum(f and l for f, l in zip(flagged, ranked_labels))
+    fp = sum(f and not l for f, l in zip(flagged, ranked_labels))
+    fn = sum(l and not f for f, l in zip(flagged, ranked_labels))
+    out["flag_precision"] = tp / (tp + fp) if tp + fp else 0.0
+    out["flag_recall"] = tp / (tp + fn) if tp + fn else 0.0
+    return out
+
+
+def evaluate(me: Identity, messages: list[Message], modes=MODES, ask_detector=None) -> dict[str, dict]:
+    results = {}
+    for mode in modes:
+        ranked = [t for t in Triager(me, messages, mode=mode, ask_detector=ask_detector).triage()
+                  if t.message.label is not None]
+        # Pessimistic tie-breaking: among equal scores, unimportant messages rank first, so a
+        # mode can't look good just because ties happened to fall in its favour.
+        ranked.sort(key=lambda t: (-round(t.score, 6), bool(t.message.label)))
+        results[mode] = metrics([bool(t.message.label) for t in ranked],
+                                [t.score >= NEEDS_YOU for t in ranked])
+        results[mode]["misses"] = [t for t in ranked if t.message.label and t.score < NEEDS_YOU]
+        results[mode]["false_alarms"] = [t for t in ranked if not t.message.label and t.score >= NEEDS_YOU]
+    return results
+
+
+def format_table(results: dict[str, dict]) -> str:
+    cols = ["p@2", "r@5", "r@10", "avg_precision", "flag_precision", "flag_recall"]
+    head = f"{'signals used':<24}" + "".join(f"{c:>15}" for c in cols)
+    lines = [head, "-" * len(head)]
+    for mode, r in results.items():
+        lines.append(f"{mode:<24}" + "".join(f"{r[c]:>15.2f}" for c in cols))
+    any_r = next(iter(results.values()))
+    lines.append(f"\n{any_r['positives']} important messages out of {any_r['messages']} inbound "
+                 f"({any_r['positives'] / max(1, any_r['messages']):.0%})")
+    return "\n".join(lines)
