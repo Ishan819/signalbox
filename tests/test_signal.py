@@ -128,3 +128,11 @@ def test_digest_lists_only_what_needs_you():
     text = build_digest(Triager(me, msgs).triage(), me.name)
     assert text.startswith("# Hi Ishan,") and "Thanksgiving plans" in text and "Filtered out" in text
     assert "Nimbus" not in text
+
+
+def test_stats_ranks_noisiest_senders_first():
+    from signalbox.stats import inbox_stats
+    me, msgs = generate()
+    text = inbox_stats(Triager(me, msgs).triage())
+    first_sender_line = text.split("unsubscribe / mute candidates):\n")[1].splitlines()[0]
+    assert "notifications@github.example.com" in first_sender_line
