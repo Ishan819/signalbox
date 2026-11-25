@@ -25,7 +25,7 @@ def main(argv=None) -> int:
     g.add_argument("--seed", type=int, default=7)
 
     for name, help_ in [("triage", "print the ranked inbox"), ("eval", "score against labels + ablation"),
-                        ("serve", "open the web UI")]:
+                        ("serve", "open the web UI"), ("digest", "short Markdown summary of what needs you")]:
         s = sub.add_parser(name, help=help_)
         s.add_argument("data", help="Signal JSON file")
         s.add_argument("--llm", choices=["anthropic", "gemini"], help="use an LLM for ask detection")
@@ -81,6 +81,11 @@ def main(argv=None) -> int:
             print(f"  MISSED      {t.score:.2f} {t.message.sender_name}: {t.message.subject}")
         for t in full["false_alarms"]:
             print(f"  FALSE ALARM {t.score:.2f} {t.message.sender_name}: {t.message.subject}  ({t.why[:70]})")
+    elif args.cmd == "digest":
+        from .digest import build_digest
+        me, msgs = load_json(args.data)
+        results = Triager(me, msgs, ask_detector=_detector(args), vip=set(args.vip), mute=set(args.mute)).triage()
+        print(build_digest(results, me.name))
     elif args.cmd == "serve":
         from .server import serve
         serve(args.data, port=args.port, ask_detector=_detector(args))

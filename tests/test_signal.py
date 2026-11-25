@@ -120,3 +120,11 @@ def test_cli_json_output(tmp_path, capsys):
     assert main(["triage", str(data), "--json", "--top", "3"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert len(out) == 3 and out[0]["tier"] == "needs_you" and "signals" in out[0]
+
+
+def test_digest_lists_only_what_needs_you():
+    from signalbox.digest import build_digest
+    me, msgs = generate()
+    text = build_digest(Triager(me, msgs).triage(), me.name)
+    assert text.startswith("# Hi Ishan,") and "Thanksgiving plans" in text and "Filtered out" in text
+    assert "Nimbus" not in text
