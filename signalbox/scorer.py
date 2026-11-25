@@ -61,10 +61,14 @@ def explain(m: Message, a: AutomationResult, r: RelationshipResult, k: AskResult
 
 class Triager:
     def __init__(self, me: Identity, messages: list[Message], mode: str = "full",
-                 ask_detector=None, now: datetime | None = None):
+                 ask_detector=None, now: datetime | None = None,
+                 vip: set[str] | None = None, mute: set[str] | None = None):
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         self.me, self.messages, self.mode = me, messages, mode
+        # Manual overrides: an address, a Slack id, or a whole domain written as "@example.com".
+        self.vip = {v.lower() for v in vip or ()}
+        self.mute = {v.lower() for v in mute or ()}
         self.automation = AutomationAnalyzer(me, messages)
         self.graph = RelationshipGraph(me, messages, now=now)
         self.ask = ask_detector or HeuristicAskDetector()
@@ -83,8 +87,18 @@ class Triager:
         else:
             k = AskResult(0.0)
         s = combine(self.mode, a.score, r.score, k.score)
+        if self._matches(m.sender, self.mute):
+            s *= 0.1
+            r.reasons.insert(0, "muted sender")
+        elif self._matches(m.sender, self.vip):
+            s = max(s, NEEDS_YOU + 0.5 * (1 - NEEDS_YOU) * k.score)
+            r.reasons.insert(0, "VIP sender")
         tier = "needs_you" if s >= NEEDS_YOU else "worth_a_look" if s >= WORTH_A_LOOK else "low"
         return Triage(m, s, tier, explain(m, a, r, k, tier), a, r, k)
+
+    @staticmethod
+    def _matches(sender: str, rules: set[str]) -> bool:
+        return sender in rules or ("@" in sender and "@" + sender.rsplit("@", 1)[1] in rules)
 
     def triage(self) -> list[Triage]:
         results = [self.score_one(m) for m in self.inbound()]

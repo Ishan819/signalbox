@@ -91,3 +91,10 @@ def test_synthetic_benchmark_ablation_story():
     assert res["full"]["avg_precision"] > res["headers+relationship"]["avg_precision"]
     assert res["full"]["avg_precision"] > res["headers"]["avg_precision"]
     assert res["full"]["flag_recall"] == 1.0
+
+
+def test_vip_and_mute_overrides():
+    msgs = [msg(1, "boss@corp.com", "fyi, deck attached"), msg(2, "friend@x.org", "Can you call me tonight?")]
+    ranked = {t.message.id: t for t in Triager(ME, msgs, vip={"@corp.com"}, mute={"friend@x.org"}).triage()}
+    assert ranked["m1"].tier == "needs_you" and "VIP sender" in ranked["m1"].why
+    assert ranked["m2"].tier == "low"

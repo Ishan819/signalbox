@@ -28,6 +28,8 @@ def main(argv=None) -> int:
         s = sub.add_parser(name, help=help_)
         s.add_argument("data", help="Signal JSON file")
         s.add_argument("--llm", choices=["anthropic", "gemini"], help="use an LLM for ask detection")
+        s.add_argument("--vip", action="append", default=[], help="always surface this sender or @domain")
+        s.add_argument("--mute", action="append", default=[], help="always bury this sender or @domain")
         if name == "triage":
             s.add_argument("--mode", choices=MODES, default="full")
             s.add_argument("--top", type=int, default=15)
@@ -56,7 +58,8 @@ def main(argv=None) -> int:
         print(f"wrote {len(msgs)} messages to {args.out}")
     elif args.cmd == "triage":
         me, msgs = load_json(args.data)
-        for t in Triager(me, msgs, mode=args.mode, ask_detector=_detector(args)).triage()[:args.top]:
+        for t in Triager(me, msgs, mode=args.mode, ask_detector=_detector(args),
+                                vip=set(args.vip), mute=set(args.mute)).triage()[:args.top]:
             flag = {"needs_you": "●", "worth_a_look": "○", "low": " "}[t.tier]
             print(f"{flag} {t.score:.2f}  {(t.message.sender_name or t.message.sender)[:22]:<22} "
                   f"{t.message.subject[:32]:<32}  {t.why[:90]}")
