@@ -24,19 +24,27 @@ It combines three independent signals, and every decision comes with an explanat
 priority = (1 - automation)^1.5 × (0.12 + 0.53·ask + 0.35·relationship)
 ```
 
-## Results (synthetic benchmark: 185 inbound messages, 7 actually important)
+## Results (synthetic benchmark: 186 inbound messages, 8 actually important)
 
 | signals used | P@2 | R@5 | R@10 | avg precision | flag precision | flag recall |
 |---|---|---|---|---|---|---|
-| automation only | 0.00 | 0.00 | 0.14 | 0.29 | 0.44 | 1.00 |
-| + relationship | 0.00 | 0.14 | 0.71 | 0.45 | 0.54 | 1.00 |
-| **+ ask (full)** | **1.00** | **0.71** | **1.00** | **1.00** | **0.88** | **1.00** |
+| automation only | 0.00 | 0.00 | 0.12 | 0.30 | 0.44 | 0.88 |
+| + relationship | 0.00 | 0.12 | 0.62 | 0.47 | 0.57 | 1.00 |
+| **+ ask (full)** | **1.00** | **0.62** | **1.00** | **0.99** | **0.89** | **1.00** |
+| learned weights (4-fold CV) | 1.00 | 0.62 | 1.00 | 0.99 | 0.67 | 1.00 |
 
 Ties are broken pessimistically, so a configuration can't look good just because of the order of equal scores.
 
 **Takeaways.** Automation signals alone can remove the bots, but they can't tell your sister's "lol look at
 this cat" apart from her "are you coming home for Thanksgiving? need to book by Tuesday". You need all three
 signals.
+
+**Agents acting for people you know.** "Hi, I'm Priya Shah's AI assistant…" looks like a bot, but it's
+really Priya. Signal ties the agent back to Priya in the relationship graph and softens the automation
+penalty, so this message still lands in "needs you".
+
+**Learned weights** match the hand-set formula on ranking. They raise more false alarms because the model
+weights the rare important class up. On a real inbox with more labels, use `signalbox tune` to pick the cut-off.
 
 **Known failure (kept in on purpose):** a one-off, hand-written AI outreach email with no headers, no
 template twins and no disclosure ("Rex Morgan") still gets flagged by the offline heuristics. `--llm`
@@ -51,9 +59,18 @@ mode is designed to catch this case.
 python -m signalbox generate --out demo_inbox.json   # labeled demo inbox
 python -m signalbox serve demo_inbox.json            # http://127.0.0.1:8000
 python -m signalbox eval demo_inbox.json             # metrics + ablation table
-python -m signalbox triage demo_inbox.json --top 10  # terminal view
+python -m signalbox triage demo_inbox.json --top 10  # terminal view (add --json for scripts)
+python -m signalbox digest demo_inbox.json           # short Markdown summary of what needs you
+python -m signalbox stats demo_inbox.json            # who floods your inbox (unsubscribe candidates)
+python -m signalbox eval demo_inbox.json --learn     # also fit weights on your labels
+python -m signalbox tune demo_inbox.json             # suggest a needs-you threshold
 python -m pytest -q                                  # tests
 ```
+
+**Overrides:** `--vip boss@corp.com` or `--vip @corp.com` always surfaces a sender or a whole domain;
+`--mute` always buries one. Both work with `triage`, `digest`, `eval` and `serve`.
+
+**In the UI:** <kbd>/</kbd> search, <kbd>j</kbd>/<kbd>k</kbd> move, <kbd>y</kbd> needs me, <kbd>n</kbd> doesn't.
 
 ### Use your real data
 
@@ -84,19 +101,23 @@ triage never goes down.
 ```
 signalbox/
   automation.py    signal 1: headers, bot flags, cadence, MinHash/LSH template detection
-  relationship.py  signal 2: graph built from your sent mail + threads
+  relationship.py  signal 2: graph built from your sent mail + threads, agent → contact linking
   ask.py           signal 3: heuristic + LLM ask detection (Anthropic / Gemini over HTTPS)
   scorer.py        combines the signals → score, tier, one-line explanation
-  evaluate.py      P@k, R@k, average precision, flag precision/recall, ablation
+  evaluate.py      P@k, R@k, average precision, flag precision/recall, ablation, threshold tuning
+  learn.py         pure-Python logistic regression, k-fold cross-validation
+  digest.py        daily summary of what needs you
+  stats.py         noisiest senders and which automation signals fire
   synth.py         labeled synthetic inbox with deliberate hard cases
   loaders.py       Signal JSON, mbox (Gmail Takeout), Slack export
   server.py        zero-dependency web UI with one-click labeling
 ```
 
-## Ideas for the next prompts (vibe-coding roadmap)
+## Roadmap
 
-1. **Learn the weights**: fit a logistic regression on your labels instead of the hand-set formula, and report the eval with a train/test split.
-2. **Gmail live mode**: use the Gmail API + OAuth to apply a `Needs-You` label automatically every 10 minutes.
-3. **Agent-on-behalf-of-human**: when an AI agent writes *for* someone you know ("sent by Priya's assistant"), connect it back to Priya in the relationship graph.
-4. **Daily digest**: one push notification with only the `needs_you` items and their one-line reasons.
-5. **Chrome extension**: highlight these messages directly inside Gmail and Slack web.
+- [x] Learn the weights from labels (logistic regression, cross-validated)
+- [x] Link AI assistants back to the contact they act for
+- [x] Daily digest, inbox stats, VIP/mute lists, threshold tuning
+- [ ] **Gmail live mode**: Gmail API + OAuth, apply a `Needs-You` label every 10 minutes
+- [ ] **Chrome extension**: highlight these messages directly inside Gmail and Slack web
+- [ ] Benchmark on a real, hand-labeled inbox and publish those numbers
