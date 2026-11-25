@@ -26,7 +26,8 @@ def main(argv=None) -> int:
 
     for name, help_ in [("triage", "print the ranked inbox"), ("eval", "score against labels + ablation"),
                         ("serve", "open the web UI"), ("digest", "short Markdown summary of what needs you"),
-                        ("stats", "who floods your inbox and why")]:
+                        ("stats", "who floods your inbox and why"),
+                        ("tune", "suggest a needs_you threshold from your labels")]:
         s = sub.add_parser(name, help=help_)
         s.add_argument("data", help="Signal JSON file")
         s.add_argument("--llm", choices=["anthropic", "gemini"], help="use an LLM for ask detection")
@@ -97,6 +98,17 @@ def main(argv=None) -> int:
         me, msgs = load_json(args.data)
         results = Triager(me, msgs, ask_detector=_detector(args), vip=set(args.vip), mute=set(args.mute)).triage()
         print(build_digest(results, me.name))
+    elif args.cmd == "tune":
+        from .evaluate import best_thresholds
+        from .scorer import NEEDS_YOU
+        me, msgs = load_json(args.data)
+        ranked = [t for t in Triager(me, msgs, ask_detector=_detector(args)).triage() if t.message.label is not None]
+        if not any(t.message.label for t in ranked):
+            print("Label some messages first (signalbox serve).", file=sys.stderr)
+            return 1
+        for name, (th, p, r) in best_thresholds([t.score for t in ranked], [bool(t.message.label) for t in ranked]).items():
+            print(f"{name:<18} threshold {th:.2f}  precision {p:.2f}  recall {r:.2f}")
+        print(f"current            threshold {NEEDS_YOU:.2f}  (signalbox/scorer.py: NEEDS_YOU)")
     elif args.cmd == "stats":
         from .stats import inbox_stats
         me, msgs = load_json(args.data)

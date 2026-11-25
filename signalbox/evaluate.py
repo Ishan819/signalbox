@@ -65,3 +65,24 @@ def evaluate_learned(me: Identity, messages: list[Message], ask_detector=None, k
     out["misses"] = [t for t in ranked if t.message.label and probs[t.message.id] < 0.5]
     out["false_alarms"] = [t for t in ranked if not t.message.label and probs[t.message.id] >= 0.5]
     return out
+
+
+def best_thresholds(scores: list[float], labels: list[bool]) -> dict[str, tuple[float, float, float]]:
+    """Candidate cut-offs for the needs_you tier: (threshold, precision, recall).
+
+    * best_f1         -- balances missed messages against false alarms
+    * catch_everything -- highest threshold that still flags every important message
+    """
+    total = sum(labels)
+    best_f1, catch_all = (0.0, 0.0, 0.0, -1.0), None
+    for th in sorted(set(scores), reverse=True):
+        flagged = [l for s, l in zip(scores, labels) if s >= th]
+        tp = sum(flagged)
+        p = tp / len(flagged) if flagged else 0.0
+        r = tp / total if total else 0.0
+        f1 = 2 * p * r / (p + r) if p + r else 0.0
+        if f1 > best_f1[3]:
+            best_f1 = (th, p, r, f1)
+        if catch_all is None and r == 1.0:
+            catch_all = (th, p, r)
+    return {"best_f1": best_f1[:3], "catch_everything": catch_all or (0.0, 0.0, 0.0)}

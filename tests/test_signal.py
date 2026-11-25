@@ -143,3 +143,10 @@ def test_learned_weights_hold_up_under_cross_validation():
     me, msgs = generate()
     res = evaluate_learned(me, msgs)
     assert res["avg_precision"] > 0.8 and res["flag_recall"] >= 0.75
+
+
+def test_best_thresholds():
+    from signalbox.evaluate import best_thresholds
+    res = best_thresholds([0.9, 0.8, 0.7, 0.6, 0.2], [True, False, True, False, False])
+    assert res["catch_everything"] == (0.7, 2 / 3, 1.0)
+    assert res["best_f1"][2] == 1.0
