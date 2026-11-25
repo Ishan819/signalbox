@@ -6,6 +6,7 @@ threads you are in) -- the one thing an AI agent blasting your inbox cannot fake
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,10 +17,18 @@ PUBLIC_DOMAINS = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "iclou
                   "proton.me", "protonmail.com", "aol.com", "live.com", "me.com"}
 
 
+DELEGATE = [
+    re.compile(r"on behalf of ([A-Z][\w-]+(?: [A-Z][\w-]+)?)"),
+    re.compile(r"([A-Z][\w-]+(?: [A-Z][\w-]+)?)['’]s (?:AI |virtual |personal |executive )?(?:assistant|agent)\b"),
+    re.compile(r"(?:assistant|agent) (?:to|for) ([A-Z][\w-]+(?: [A-Z][\w-]+)?)", re.I),
+]
+
+
 @dataclass
 class RelationshipResult:
     score: float                     # 0 = stranger, 1 = close, active relationship
     reasons: list[str] = field(default_factory=list)
+    delegate: str | None = None      # known contact an agent is writing for
 
 
 def _domain(addr: str) -> str | None:
@@ -57,6 +66,27 @@ class RelationshipGraph:
                 if d and d not in PUBLIC_DOMAINS:
                     self.domain_contacts[d].add(r)
 
+        # Names of people you actually write to, so "Priya's assistant" can be tied back to Priya.
+        self.contact_names: dict[str, str] = {}
+        first_names: dict[str, set[str]] = defaultdict(set)
+        for m in messages:
+            if m.sender in self.sent_to and m.sender_name:
+                self.contact_names[m.sender_name.lower()] = m.sender
+                first_names[m.sender_name.split()[0].lower()].add(m.sender)
+        for first, addrs in first_names.items():
+            if len(addrs) == 1:               # only use a first name if it is unambiguous
+                self.contact_names.setdefault(first, next(iter(addrs)))
+
+    def _delegate(self, m: Message) -> tuple[str, str] | None:
+        text = f"{m.sender_name}\n{m.subject}\n{m.body}"
+        for rx in DELEGATE:
+            for match in rx.finditer(text):
+                name = match.group(1)
+                for candidate in (name.lower(), name.split()[0].lower()):
+                    if candidate in self.contact_names:
+                        return name, self.contact_names[candidate]
+        return None
+
     def _person_strength(self, who: str) -> tuple[float, int, float]:
         stamps = self.sent_to.get(who)
         if not stamps:
@@ -75,6 +105,13 @@ class RelationshipGraph:
         else:
             d = _domain(m.sender)
             colleagues = self.domain_contacts.get(d, set()) if d else set()
+            delegate = self._delegate(m)
+            if delegate:
+                name, addr = delegate
+                strength, count, _ = self._person_strength(addr)
+                score = 0.8 * strength
+                reasons.append(f"sent on behalf of {name} (you've written to them {count}×)")
+                return RelationshipResult(min(1.0, score), reasons, delegate=name)
             if colleagues:
                 score = max(score, 0.3)
                 reasons.append(f"same org as people you write to (@{d})")

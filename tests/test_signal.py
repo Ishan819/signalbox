@@ -98,3 +98,14 @@ def test_vip_and_mute_overrides():
     ranked = {t.message.id: t for t in Triager(ME, msgs, vip={"@corp.com"}, mute={"friend@x.org"}).triage()}
     assert ranked["m1"].tier == "needs_you" and "VIP sender" in ranked["m1"].why
     assert ranked["m2"].tier == "low"
+
+
+def test_agent_acting_for_a_known_contact_is_linked_back():
+    msgs = [msg(i, "me@x.com", "ok", recipients=["priya@x.org"]) for i in range(5)]
+    msgs += [msg(9, "priya@x.org", "hey", sender_name="Priya Shah"),
+             msg(10, "bot@agents.io", "Hi, I'm Priya Shah's AI assistant. Can you join the call at 4pm?",
+                 sender_name="Assistant"),
+             msg(11, "ava@sales.io", "Hi, I'm an AI assistant at Nimbus. Can you join a call at 4pm?")]
+    ranked = {t.message.id: t for t in Triager(ME, msgs).triage()}
+    assert ranked["m10"].relationship.delegate == "Priya Shah"
+    assert ranked["m10"].score > 2 * ranked["m11"].score

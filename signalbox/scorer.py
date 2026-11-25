@@ -79,6 +79,10 @@ class Triager:
     def score_one(self, m: Message) -> Triage:
         a = self.automation.analyze(m)
         r = self.graph.analyze(m)
+        if r.delegate and self.mode != "headers":
+            # An agent writing *for* someone you know is not the same as a cold AI agent.
+            a.score *= 0.3
+            a.reasons.append(f"automated, but acting for {r.delegate}")
         # Only spend LLM calls on messages that are not already obviously machine-sent.
         if self.mode == "full" and (a.score < 0.7 or self.ask.name == "heuristic"):
             k = self.ask.detect(m, self.me)

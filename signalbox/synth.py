@@ -87,6 +87,11 @@ def generate(seed: int = 7) -> tuple[Identity, list[Message]]:
           body="<@u_ishan> can you review my PR when you get a chance? It touches your cache code.",
           label=True, timestamp=NOW - timedelta(hours=5))
 
+    b.add(sender="assistant@agentmail.example.io", sender_name="Priya's Assistant", subject="Demo dry-run",
+          body="Hi Ishan, I'm Priya Shah's AI assistant. Priya asked me to check: can you join the demo dry-run "
+               "tomorrow at 4pm? Please reply so I can update her calendar.", label=True,
+          timestamp=NOW - timedelta(hours=6))
+
     # ------------------------------------------- humans, but nothing needed
     for body in ["lol look at this cat https://example.com/cat", "Happy Diwali!! miss you",
                  "Mom says hi. No need to call back."]:
