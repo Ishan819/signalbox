@@ -52,3 +52,16 @@ def format_table(results: dict[str, dict]) -> str:
     lines.append(f"\n{any_r['positives']} important messages out of {any_r['messages']} inbound "
                  f"({any_r['positives'] / max(1, any_r['messages']):.0%})")
     return "\n".join(lines)
+
+
+def evaluate_learned(me: Identity, messages: list[Message], ask_detector=None, k: int = 4) -> dict:
+    """Same metrics, but scores come from a logistic model scored with k-fold cross-validation."""
+    from .learn import cross_validated_scores
+    results = Triager(me, messages, mode="full", ask_detector=ask_detector).triage()
+    probs = cross_validated_scores(results, k=k)
+    ranked = sorted((t for t in results if t.message.id in probs),
+                    key=lambda t: (-round(probs[t.message.id], 6), bool(t.message.label)))
+    out = metrics([bool(t.message.label) for t in ranked], [probs[t.message.id] >= 0.5 for t in ranked])
+    out["misses"] = [t for t in ranked if t.message.label and probs[t.message.id] < 0.5]
+    out["false_alarms"] = [t for t in ranked if not t.message.label and probs[t.message.id] >= 0.5]
+    return out

@@ -38,6 +38,9 @@ def main(argv=None) -> int:
             s.add_argument("--json", action="store_true", help="machine-readable output")
         if name == "serve":
             s.add_argument("--port", type=int, default=8000)
+        if name == "eval":
+            s.add_argument("--learn", action="store_true",
+                           help="also fit weights on your labels (reported with 4-fold cross-validation)")
 
     im = sub.add_parser("import-mbox", help="convert an mbox (e.g. Gmail Takeout) to Signal JSON")
     im.add_argument("mbox")
@@ -76,7 +79,14 @@ def main(argv=None) -> int:
             print("No labels yet — label some messages in `serve` first.", file=sys.stderr)
             return 1
         res = evaluate(me, msgs, ask_detector=_detector(args))
+        if args.learn:
+            from .evaluate import evaluate_learned
+            from .learn import fit_all
+            res["learned (4-fold CV)"] = evaluate_learned(me, msgs, ask_detector=_detector(args))
         print(format_table(res))
+        if args.learn:
+            model = fit_all(Triager(me, msgs, ask_detector=_detector(args)).triage())
+            print("\nLearned weights (fit on all labels):\n" + model.explain())
         full = res["full"]
         for t in full["misses"]:
             print(f"  MISSED      {t.score:.2f} {t.message.sender_name}: {t.message.subject}")

@@ -136,3 +136,10 @@ def test_stats_ranks_noisiest_senders_first():
     text = inbox_stats(Triager(me, msgs).triage())
     first_sender_line = text.split("unsubscribe / mute candidates):\n")[1].splitlines()[0]
     assert "notifications@github.example.com" in first_sender_line
+
+
+def test_learned_weights_hold_up_under_cross_validation():
+    from signalbox.evaluate import evaluate_learned
+    me, msgs = generate()
+    res = evaluate_learned(me, msgs)
+    assert res["avg_precision"] > 0.8 and res["flag_recall"] >= 0.75
