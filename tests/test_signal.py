@@ -109,3 +109,14 @@ def test_agent_acting_for_a_known_contact_is_linked_back():
     ranked = {t.message.id: t for t in Triager(ME, msgs).triage()}
     assert ranked["m10"].relationship.delegate == "Priya Shah"
     assert ranked["m10"].score > 2 * ranked["m11"].score
+
+
+def test_cli_json_output(tmp_path, capsys):
+    import json
+    from signalbox.__main__ import main
+    data = tmp_path / "inbox.json"
+    assert main(["generate", "--out", str(data)]) == 0
+    capsys.readouterr()
+    assert main(["triage", str(data), "--json", "--top", "3"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert len(out) == 3 and out[0]["tier"] == "needs_you" and "signals" in out[0]

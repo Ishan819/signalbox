@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from .ask import LLMAskDetector
@@ -33,6 +34,7 @@ def main(argv=None) -> int:
         if name == "triage":
             s.add_argument("--mode", choices=MODES, default="full")
             s.add_argument("--top", type=int, default=15)
+            s.add_argument("--json", action="store_true", help="machine-readable output")
         if name == "serve":
             s.add_argument("--port", type=int, default=8000)
 
@@ -58,8 +60,12 @@ def main(argv=None) -> int:
         print(f"wrote {len(msgs)} messages to {args.out}")
     elif args.cmd == "triage":
         me, msgs = load_json(args.data)
-        for t in Triager(me, msgs, mode=args.mode, ask_detector=_detector(args),
-                                vip=set(args.vip), mute=set(args.mute)).triage()[:args.top]:
+        ranked = Triager(me, msgs, mode=args.mode, ask_detector=_detector(args),
+                         vip=set(args.vip), mute=set(args.mute)).triage()[:args.top]
+        if args.json:
+            print(json.dumps([t.to_dict() for t in ranked], indent=2))
+            return 0
+        for t in ranked:
             flag = {"needs_you": "●", "worth_a_look": "○", "low": " "}[t.tier]
             print(f"{flag} {t.score:.2f}  {(t.message.sender_name or t.message.sender)[:22]:<22} "
                   f"{t.message.subject[:32]:<32}  {t.why[:90]}")
