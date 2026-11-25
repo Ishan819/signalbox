@@ -35,15 +35,20 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute
 .lab button.on{background:var(--ink);color:var(--bg)}
 details summary{cursor:pointer;color:var(--mute);margin:28px 0 10px}
 .low{padding:8px 14px}.low .body{display:none}
+.msg.sel{outline:2px solid var(--ink);outline-offset:2px}
+input[type=search]{flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.keys{color:var(--mute);font-size:12px;margin:-16px 0 20px}kbd{border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11px}
 </style></head><body><main>
 <h1>Signal</h1><p class="sub">The few messages that need <em>you</em> — everything automated is out of the way.</p>
 <div class="bar" id="stats"></div>
+<p class="keys"><kbd>/</kbd> search · <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>y</kbd> needs me · <kbd>n</kbd> doesn't</p>
 <div id="list"></div>
 </main>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let mode=new URLSearchParams(location.search).get("mode")||"full";
+let q="",sel=0,data=null;
 function meter(label,v){return `<span>${label}<span class="meter"><i style="width:${Math.round(v*100)}%"></i></span></span>`}
 function card(t){const m=t.message,s=t.signals;
  const lab=m.label===true?"yes":m.label===false?"no":"";
@@ -55,19 +60,34 @@ function card(t){const m=t.message,s=t.signals;
  <span class="lab" title="Label it — labels feed the eval">
  <button class="${lab==="yes"?"on":""}" onclick="label('${esc(m.id)}',true)">needs me</button>
  <button class="${lab==="no"?"on":""}" onclick="label('${esc(m.id)}',false)">doesn't</button></span></div></div>`}
-async function load(){
- const d=await (await fetch("/api/triage?mode="+mode)).json();
- const g=k=>d.results.filter(t=>t.tier===k);
+async function load(){data=await (await fetch("/api/triage?mode="+mode)).json();render()}
+function render(){
+ const d=data,needle=q.toLowerCase();
+ const hit=t=>!needle||[t.message.sender_name,t.message.sender,t.message.subject,t.message.body].join(" ").toLowerCase().includes(needle);
+ const g=k=>d.results.filter(t=>t.tier===k&&hit(t));
  const auto=d.results.filter(t=>t.signals.automation.score>=.5).length;
  $("#stats").innerHTML=`<div class="stat"><b>${d.results.length}</b><span>inbound</span></div>
  <div class="stat"><b>${g("needs_you").length}</b><span>need you</span></div>
  <div class="stat"><b>${auto}</b><span>automated / agents</span></div>
+ <input type="search" id="q" placeholder="Search…" value="${esc(q)}" oninput="q=this.value;sel=0;render();this.focus()">
  <select onchange="mode=this.value;load()">${d.modes.map(x=>`<option ${x===mode?"selected":""}>${x}</option>`).join("")}</select>`;
  $("#list").innerHTML=`<h2>Needs you</h2>${g("needs_you").map(card).join("")||"<p>Nothing. Enjoy.</p>"}
  <h2>Worth a look</h2>${g("worth_a_look").map(card).join("")}
- <details><summary>Filtered out (${g("low").length})</summary><div class="lowwrap">${g("low").map(t=>card(t).replace('class="msg low','class="msg low')).join("")}</div></details>`;
+ <details ${needle?"open":""}><summary>Filtered out (${g("low").length})</summary><div class="lowwrap">${g("low").map(t=>card(t).replace('class="msg low','class="msg low')).join("")}</div></details>`;
  document.querySelectorAll(".msg.low").forEach(e=>e.classList.add("low"));
+ const q2=$("#q");if(document.activeElement!==q2&&needle){q2.focus();q2.setSelectionRange(q.length,q.length)}
+ highlight();
 }
+function visible(){return [...document.querySelectorAll(".msg")].filter(e=>e.offsetParent!==null)}
+function highlight(scroll){const v=visible();sel=Math.max(0,Math.min(sel,v.length-1));
+ document.querySelectorAll(".msg.sel").forEach(e=>e.classList.remove("sel"));
+ if(v[sel]){v[sel].classList.add("sel");if(scroll)v[sel].scrollIntoView({block:"nearest"})}}
+document.addEventListener("keydown",e=>{
+ if(e.target.tagName==="INPUT"){if(e.key==="Escape")e.target.blur();return}
+ if(e.key==="/"){e.preventDefault();$("#q").focus();return}
+ if(e.key==="j"){sel++;highlight(true)}else if(e.key==="k"){sel--;highlight(true)}
+ else if(e.key==="y"||e.key==="n"){const c=visible()[sel];if(c)label(c.dataset.id,e.key==="y")}
+});
 async function label(id,v){await fetch("/api/label",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,label:v})});load()}
 load();
 </script></body></html>"""
