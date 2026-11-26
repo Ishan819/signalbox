@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Signal for Gmail — options</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 520px; margin: 32px auto; padding: 0 16px; }
+    input { width: 100%; padding: 6px 8px; box-sizing: border-box; }
+    #status { margin-top: 8px; min-height: 1.5em; }
+    .err { color: #b91c1c; } .ok { color: #15803d; }
+  </style>
+</head>
+<body>
+  <h1>Signal for Gmail</h1>
+  <p>Where is <code>signalbox serve</code> running? Only <code>http://127.0.0.1</code> or
+     <code>http://localhost</code> addresses are allowed — your inbox never leaves this machine.</p>
+  <label for="server">Server</label>
+  <input id="server" placeholder="http://127.0.0.1:8000">
+  <p><button id="save">Save &amp; test</button></p>
+  <div id="status"></div>
+  <script src="match.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

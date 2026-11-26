@@ -17,6 +17,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install pytest
       - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Chrome extension tests
+        run: node --test extension/tests/*.test.js
       - name: Benchmark on the synthetic inbox
         run: |
           python -m signalbox generate --out demo_inbox.json

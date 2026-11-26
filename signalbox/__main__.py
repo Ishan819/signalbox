@@ -131,7 +131,7 @@ def main(argv=None) -> int:
         print(inbox_stats(Triager(me, msgs, vip=set(args.vip), mute=set(args.mute)).triage()))
     elif args.cmd == "serve":
         from .server import serve
-        serve(args.data, port=args.port, ask_detector=_detector(args))
+        serve(args.data, port=args.port, ask_detector=_detector(args), vip=set(args.vip), mute=set(args.mute))
     elif args.cmd == "import-mbox":
         me = Identity(args.name, set(args.me))
         msgs = load_mbox(args.mbox, me, limit=args.limit)

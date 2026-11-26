@@ -93,8 +93,14 @@ load();
 </script></body></html>"""
 
 
-def serve(path: str | Path, host: str = "127.0.0.1", port: int = 8000, ask_detector=None) -> None:
+def make_server(path: str | Path, host: str = "127.0.0.1", port: int = 8000, ask_detector=None,
+                vip: set[str] | None = None, mute: set[str] | None = None) -> ThreadingHTTPServer:
+    """Build the HTTP server without starting it (tests bind port 0 and run it in a thread)."""
     path = Path(path)
+
+    def triage(mode: str = "full"):
+        me, msgs = load_json(path)
+        return Triager(me, msgs, mode=mode, ask_detector=ask_detector, vip=vip, mute=mute).triage()
 
     class Handler(BaseHTTPRequestHandler):
         def _json(self, obj, code=200):
@@ -102,6 +108,7 @@ def serve(path: str | Path, host: str = "127.0.0.1", port: int = 8000, ask_detec
             self.send_response(code)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 
@@ -111,29 +118,56 @@ def serve(path: str | Path, host: str = "127.0.0.1", port: int = 8000, ask_detec
                 body = PAGE.encode()
                 self.send_response(200)
                 self.send_header("content-type", "text/html; charset=utf-8")
+                self.send_header("content-length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
             elif url.path == "/api/triage":
                 mode = parse_qs(url.query).get("mode", ["full"])[0]
-                me, msgs = load_json(path)
-                results = Triager(me, msgs, mode=mode, ask_detector=ask_detector).triage()
-                self._json({"modes": list(MODES), "results": [t.to_dict() for t in results]})
+                if mode not in MODES:
+                    return self._json({"error": f"mode must be one of {list(MODES)}"}, 400)
+                self._json({"modes": list(MODES), "results": [t.to_dict() for t in triage(mode)]})
+            elif url.path == "/api/needs-you":
+                # Compact feed for the Chrome extension: only what it highlights. No CORS header on
+                # purpose -- the extension reads it via host_permissions, ordinary web pages can't.
+                self._json({"items": [needs_you_item(t) for t in triage() if t.tier in HIGHLIGHT_TIERS]})
             else:
                 self._json({"error": "not found"}, 404)
 
         def do_POST(self):
             if self.path != "/api/label":
                 return self._json({"error": "not found"}, 404)
-            req = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
+            try:
+                req = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
+                msg_id, label = req["id"], req["label"]
+            except (ValueError, KeyError, TypeError):
+                return self._json({"error": "expected JSON {\"id\": ..., \"label\": true|false|null}"}, 400)
             me, msgs = load_json(path)
+            found = False
             for m in msgs:
-                if m.id == req["id"]:
-                    m.label = req["label"]
+                if m.id == msg_id:
+                    m.label, found = label, True
+            if not found:
+                return self._json({"error": "unknown message id"}, 404)
             save_json(path, me, msgs)
             self._json({"ok": True})
 
         def log_message(self, *args):
             pass
 
+    return ThreadingHTTPServer((host, port), Handler)
+
+
+HIGHLIGHT_TIERS = ("needs_you", "worth_a_look")
+
+
+def needs_you_item(t) -> dict:
+    m = t.message
+    return {"id": m.id, "thread_id": m.thread_id, "sender": m.sender, "sender_name": m.sender_name,
+            "subject": m.subject, "score": round(t.score, 4), "tier": t.tier, "why": t.why}
+
+
+def serve(path: str | Path, host: str = "127.0.0.1", port: int = 8000, ask_detector=None,
+          vip: set[str] | None = None, mute: set[str] | None = None) -> None:
+    server = make_server(path, host, port, ask_detector, vip, mute)
     print(f"Signal running on http://{host}:{port}  (data: {path})")
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    server.serve_forever()
