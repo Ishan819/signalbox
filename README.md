@@ -1,6 +1,6 @@
 # Signal
 
-**Out of 100 messages, 90 come from bots, AI agents, and automations. Signal finds the 2 that actually need you.**
+**Most of your inbox is bots, notifications and AI agents. Signal finds the few messages that actually need you.**
 
 ![Signal UI](docs/signal_ui.png)
 
