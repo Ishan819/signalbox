@@ -8,3 +8,5 @@ demo_inbox.json
 gmail_token.json
 gmail_cache.json
 *.labeled.json
+*.corrupt-*
+.*.tmp

@@ -7,9 +7,17 @@ import sys
 
 from .ask import LLMAskDetector
 from .evaluate import evaluate, format_table
-from .loaders import load_json, load_mbox, load_slack_export, save_json
+from .gmail_auth import GmailAuthError
+from .loaders import InvalidDataError, load_json, load_mbox, load_slack_export, save_json
 from .models import Identity
 from .scorer import MODES, Triager
+
+
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value}")
+    return n
 
 
 def _detector(args):
@@ -66,14 +74,23 @@ def main(argv=None) -> int:
     gs.add_argument("--token", default="gmail_token.json")
     gs.add_argument("--cache", default="gmail_cache.json")
     gs.add_argument("--name", default="Me")
-    gs.add_argument("--limit", type=int, default=50, help="max messages to fetch per side (inbox/sent)")
+    gs.add_argument("--limit", type=_positive_int, default=50, help="max messages to fetch per side (inbox/sent)")
     gs.add_argument("--query", default="newer_than:7d", help="Gmail search filter for what's \"recent\"")
     gs.add_argument("--dry-run", action="store_true", help="score and report, don't touch Gmail labels")
     gs.add_argument("--watch", action="store_true", help="keep syncing every --interval seconds")
-    gs.add_argument("--interval", type=int, default=600)
+    gs.add_argument("--interval", type=_positive_int, default=600, help="seconds between syncs")
 
     args = p.parse_args(argv)
+    try:
+        return _run(args)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError, InvalidDataError, GmailAuthError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
 
+
+def _run(args) -> int:
     if args.cmd == "generate":
         from .synth import generate
         me, msgs = generate(args.seed)
@@ -144,12 +161,20 @@ def main(argv=None) -> int:
         print(f"wrote {len(msgs)} messages to {args.out}")
     elif args.cmd == "gmail-auth":
         from . import gmail_auth
-        token = gmail_auth.run_oauth_flow(args.client_id, args.client_secret, port=args.port)
+        try:
+            token = gmail_auth.run_oauth_flow(args.client_id, args.client_secret, port=args.port)
+        except OSError as exc:
+            print(f"error: couldn't listen on localhost:{args.port} for the OAuth redirect ({exc}). "
+                  f"Try --port with another number.", file=sys.stderr)
+            return 1
+        except (RuntimeError, TimeoutError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         gmail_auth.save_token(args.token, token)
         print(f"Authorized. Token saved to {args.token} -- now run `signalbox gmail-sync --watch`.")
     elif args.cmd == "gmail-sync":
         from . import gmail_auth, gmail_sync
-        from .gmail_api import GmailClient
+        from .gmail_api import GmailAPIError, GmailClient
         token = gmail_auth.load_token(args.token)
         if token is None:
             print(f"No token at {args.token}. Run `signalbox gmail-auth` first.", file=sys.stderr)
@@ -167,11 +192,19 @@ def main(argv=None) -> int:
             for m in newly_labeled:
                 print(f"needs-you: {(m.sender_name or m.sender)[:30]:<30} {m.subject[:60]}")
 
-        sync_kwargs = dict(name=args.name, limit=args.limit, query=args.query, dry_run=args.dry_run)
+        def problem(text):
+            print(f"warning: {text}", file=sys.stderr)
+
+        sync_kwargs = dict(name=args.name, limit=args.limit, query=args.query, dry_run=args.dry_run,
+                           on_problem=problem)
         if args.watch:
             gmail_sync.watch(client_factory, args.cache, interval=args.interval, on_sync=report, **sync_kwargs)
         else:
-            report(gmail_sync.sync_once(client_factory(), args.cache, **sync_kwargs), None)
+            try:
+                report(gmail_sync.sync_once(client_factory(), args.cache, **sync_kwargs), None)
+            except GmailAPIError as exc:
+                report([], exc)
+                return 1
     return 0
 
 

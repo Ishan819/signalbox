@@ -1,6 +1,10 @@
 import base64
 import json
 
+import pytest
+
+from signalbox.gmail_api import GmailAPIError
+from signalbox.gmail_auth import GmailAuthError
 from signalbox.gmail_sync import sync_once, watch
 from signalbox.loaders import load_json
 
@@ -145,3 +149,90 @@ def test_watch_survives_a_failing_cycle_and_keeps_going(tmp_path):
     assert len(cycles) == 2
     assert isinstance(cycles[0][1], RuntimeError) and cycles[0][0] == []
     assert cycles[1][1] is None and [m.id for m in cycles[1][0]] == ["ask1"]
+
+
+# ------------------------------------------------------------ hardening
+class FlakyClient(FakeGmailClient):
+    """FakeGmailClient whose get_message / modify_message fail for chosen ids."""
+
+    def __init__(self, *a, get_errors=None, modify_errors=None, **kw):
+        super().__init__(*a, **kw)
+        self.get_errors, self.modify_errors = dict(get_errors or {}), dict(modify_errors or {})
+
+    def get_message(self, msg_id):
+        if msg_id in self.get_errors:
+            raise self.get_errors.pop(msg_id)
+        return super().get_message(msg_id)
+
+    def modify_message(self, msg_id, add_label_ids=(), remove_label_ids=()):
+        if msg_id in self.modify_errors:
+            raise self.modify_errors.pop(msg_id)
+        return super().modify_message(msg_id, add_label_ids, remove_label_ids)
+
+
+ASK2 = _raw("ask2", "sam@x.org", "Sign-off", "Can you approve the budget by Friday?")
+
+
+def test_one_unfetchable_message_is_skipped_and_retried_next_run(tmp_path):
+    client = FlakyClient(["ask1", "ask2"], [], {"ask1": ASK, "ask2": ASK2},
+                         get_errors={"ask1": GmailAPIError("HTTP 500 after retries")})
+    problems = []
+    first = sync_once(client, tmp_path / "c.json", limit=10, on_problem=problems.append)
+    assert [m.id for m in first] == ["ask2"]
+    assert len(problems) == 1 and "ask1" in problems[0]
+
+    second = sync_once(client, tmp_path / "c.json", limit=10, on_problem=problems.append)
+    assert [m.id for m in second] == ["ask1"]          # fetched and labeled on the retry
+
+
+def test_unparseable_message_is_skipped(tmp_path):
+    client = FakeGmailClient(["ask1", "junk"], [], {"ask1": ASK, "junk": {"payload": {}}})
+    problems = []
+    labeled = sync_once(client, tmp_path / "c.json", limit=10, on_problem=problems.append)
+    assert [m.id for m in labeled] == ["ask1"] and "junk" in problems[0]
+
+
+def test_failed_label_is_not_recorded_so_the_next_run_retries_it(tmp_path):
+    client = FlakyClient(["ask1", "ask2"], [], {"ask1": ASK, "ask2": ASK2},
+                         modify_errors={"ask1": GmailAPIError("HTTP 503")})
+    problems = []
+    first = sync_once(client, tmp_path / "c.json", limit=10, on_problem=problems.append)
+    assert [m.id for m in first] == ["ask2"] and "couldn't label ask1" in problems[0]
+    assert json.loads((tmp_path / "c.labeled.json").read_text()) == ["ask2"]
+
+    second = sync_once(client, tmp_path / "c.json", limit=10)
+    assert [m.id for m in second] == ["ask1"]
+
+
+def test_auth_errors_are_not_swallowed_per_message(tmp_path):
+    client = FlakyClient(["ask1"], [], {"ask1": ASK}, get_errors={"ask1": GmailAuthError("401")})
+    with pytest.raises(GmailAuthError):
+        sync_once(client, tmp_path / "c.json", limit=10)
+
+
+def test_corrupt_cache_and_state_are_set_aside_and_rebuilt(tmp_path):
+    cache = tmp_path / "c.json"
+    cache.write_text("{ truncated")
+    (tmp_path / "c.labeled.json").write_text('{"not": "a list"}')
+    problems = []
+    client = FakeGmailClient(["ask1"], [], {"ask1": ASK})
+
+    labeled = sync_once(client, cache, limit=10, on_problem=problems.append)
+
+    assert [m.id for m in labeled] == ["ask1"]
+    assert len(problems) == 2 and all("starting fresh" in p for p in problems)
+    backups = sorted(p.name for p in tmp_path.iterdir() if ".corrupt-" in p.name)
+    assert len(backups) == 2                            # kept for inspection, not deleted
+    assert {m.id for m in load_json(cache)[1]} == {"ask1"}
+
+
+def test_watch_stops_on_auth_error(tmp_path):
+    def revoked():
+        raise GmailAuthError("token revoked")
+
+    cycles, sleeps = [], []
+    with pytest.raises(GmailAuthError):
+        watch(revoked, tmp_path / "c.json", interval=1, max_iterations=5,
+              on_sync=lambda labeled, err: cycles.append(err), sleep=sleeps.append)
+    assert len(cycles) == 1 and isinstance(cycles[0], GmailAuthError)
+    assert sleeps == []                                 # didn't keep retrying every interval

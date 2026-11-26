@@ -12,6 +12,7 @@ import http.server
 import json
 import secrets
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -21,6 +22,10 @@ from pathlib import Path
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPES = "https://www.googleapis.com/auth/gmail.modify"
+
+
+class GmailAuthError(RuntimeError):
+    """Credentials are missing, unreadable, revoked or rejected -- retrying won't help."""
 
 
 @dataclass
@@ -48,7 +53,12 @@ class Token:
 
 def load_token(path: str | Path) -> Token | None:
     p = Path(path)
-    return Token.from_dict(json.loads(p.read_text())) if p.exists() else None
+    if not p.exists():
+        return None
+    try:
+        return Token.from_dict(json.loads(p.read_text()))
+    except (ValueError, KeyError, TypeError) as exc:
+        raise GmailAuthError(f"{p} is not a valid token file ({exc}). Run `signalbox gmail-auth` again.") from exc
 
 
 def save_token(path: str | Path, token: Token) -> None:
@@ -118,8 +128,14 @@ def run_oauth_flow(client_id: str, client_secret: str, port: int = 8765,
 
 
 def refresh(token: Token) -> Token:
-    data = _http_post_form(TOKEN_URL, {"refresh_token": token.refresh_token, "client_id": token.client_id,
-                                       "client_secret": token.client_secret, "grant_type": "refresh_token"})
+    try:
+        data = _http_post_form(TOKEN_URL, {"refresh_token": token.refresh_token, "client_id": token.client_id,
+                                           "client_secret": token.client_secret, "grant_type": "refresh_token"})
+    except urllib.error.HTTPError as exc:
+        if exc.code in (400, 401):   # invalid_grant: revoked, expired (7-day "Testing" apps), or wrong client
+            raise GmailAuthError("Google refused to refresh the Gmail token (access revoked or expired). "
+                                 "Run `signalbox gmail-auth` again.") from exc
+        raise
     return Token(data["access_token"], token.refresh_token, time.time() + data["expires_in"],
                 token.client_id, token.client_secret)
 
