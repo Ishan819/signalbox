@@ -96,6 +96,30 @@ python -m signalbox eval me.json --llm anthropic      # or --llm gemini
 Results are cached in `.signal_cache.json`. If the LLM fails, Signal falls back to the heuristics, so
 triage never goes down.
 
+### Gmail live mode
+
+Signal can watch your Gmail inbox and apply a `Needs-You` label to the messages that need you, on its
+own, no copy-pasting an mbox export. It talks to the Gmail API with plain `urllib` — no
+`google-api-python-client` dependency, same "stdlib only" rule as everything else here.
+
+```bash
+# one-time setup: console.cloud.google.com -> new project -> enable the "Gmail API" ->
+# OAuth consent screen (you can leave it in "Testing") -> Credentials -> Create OAuth client ID,
+# type "Desktop app". Copy the client ID and secret it gives you.
+python -m signalbox gmail-auth --client-id ... --client-secret ...   # opens a browser, saves gmail_token.json
+
+python -m signalbox gmail-sync                 # one sync pass
+python -m signalbox gmail-sync --dry-run        # preview what would be labeled, touches nothing
+python -m signalbox gmail-sync --watch          # keep syncing every --interval seconds (default 600 = 10 min)
+```
+
+The OAuth scope requested is `gmail.modify` — Signal can read mail and add/remove labels, but can't
+delete anything or send mail on your behalf. Each sync pulls recent inbox + sent mail (`--query`,
+default `newer_than:7d`) into a local cache (`--cache`, default `gmail_cache.json`) that's a normal
+Signal JSON file — point `triage` / `eval` / `serve` at it like any other inbox. A `.labeled.json`
+sidecar next to the cache tracks what's already been labeled, so re-running (or `--watch`) never
+re-touches a message.
+
 ## Layout
 
 ```
@@ -111,6 +135,9 @@ signalbox/
   synth.py         labeled synthetic inbox with deliberate hard cases
   loaders.py       Signal JSON, mbox (Gmail Takeout), Slack export
   server.py        zero-dependency web UI with one-click labeling
+  gmail_auth.py    Gmail live mode: OAuth (local-loopback flow, token refresh)
+  gmail_api.py     Gmail live mode: REST client, Gmail message -> Signal Message
+  gmail_sync.py    Gmail live mode: cache + score + label, one-shot or --watch
 ```
 
 ## Roadmap
@@ -118,6 +145,6 @@ signalbox/
 - [x] Learn the weights from labels (logistic regression, cross-validated)
 - [x] Link AI assistants back to the contact they act for
 - [x] Daily digest, inbox stats, VIP/mute lists, threshold tuning
-- [ ] **Gmail live mode**: Gmail API + OAuth, apply a `Needs-You` label every 10 minutes
+- [x] **Gmail live mode**: Gmail API + OAuth, apply a `Needs-You` label every 10 minutes
 - [ ] **Chrome extension**: highlight these messages directly inside Gmail and Slack web
 - [ ] Benchmark on a real, hand-labeled inbox and publish those numbers
