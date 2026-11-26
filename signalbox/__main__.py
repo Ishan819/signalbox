@@ -56,6 +56,22 @@ def main(argv=None) -> int:
     isl.add_argument("--name", default="Me")
     isl.add_argument("--out", default="slack.json")
 
+    ga = sub.add_parser("gmail-auth", help="authorize Signal to read and label your Gmail (OAuth)")
+    ga.add_argument("--client-id", required=True)
+    ga.add_argument("--client-secret", required=True)
+    ga.add_argument("--token", default="gmail_token.json")
+    ga.add_argument("--port", type=int, default=8765)
+
+    gs = sub.add_parser("gmail-sync", help="apply a Needs-You Gmail label to what needs you (live mode)")
+    gs.add_argument("--token", default="gmail_token.json")
+    gs.add_argument("--cache", default="gmail_cache.json")
+    gs.add_argument("--name", default="Me")
+    gs.add_argument("--limit", type=int, default=50, help="max messages to fetch per side (inbox/sent)")
+    gs.add_argument("--query", default="newer_than:7d", help="Gmail search filter for what's \"recent\"")
+    gs.add_argument("--dry-run", action="store_true", help="score and report, don't touch Gmail labels")
+    gs.add_argument("--watch", action="store_true", help="keep syncing every --interval seconds")
+    gs.add_argument("--interval", type=int, default=600)
+
     args = p.parse_args(argv)
 
     if args.cmd == "generate":
@@ -126,6 +142,36 @@ def main(argv=None) -> int:
         msgs = load_slack_export(args.folder, me)
         save_json(args.out, me, msgs)
         print(f"wrote {len(msgs)} messages to {args.out}")
+    elif args.cmd == "gmail-auth":
+        from . import gmail_auth
+        token = gmail_auth.run_oauth_flow(args.client_id, args.client_secret, port=args.port)
+        gmail_auth.save_token(args.token, token)
+        print(f"Authorized. Token saved to {args.token} -- now run `signalbox gmail-sync --watch`.")
+    elif args.cmd == "gmail-sync":
+        from . import gmail_auth, gmail_sync
+        from .gmail_api import GmailClient
+        token = gmail_auth.load_token(args.token)
+        if token is None:
+            print(f"No token at {args.token}. Run `signalbox gmail-auth` first.", file=sys.stderr)
+            return 1
+
+        def client_factory():
+            nonlocal token
+            access_token, token = gmail_auth.valid_access_token(token)
+            gmail_auth.save_token(args.token, token)
+            return GmailClient(access_token)
+
+        def report(newly_labeled, error):
+            if error:
+                print(f"sync failed: {error}", file=sys.stderr)
+            for m in newly_labeled:
+                print(f"needs-you: {(m.sender_name or m.sender)[:30]:<30} {m.subject[:60]}")
+
+        sync_kwargs = dict(name=args.name, limit=args.limit, query=args.query, dry_run=args.dry_run)
+        if args.watch:
+            gmail_sync.watch(client_factory, args.cache, interval=args.interval, on_sync=report, **sync_kwargs)
+        else:
+            report(gmail_sync.sync_once(client_factory(), args.cache, **sync_kwargs), None)
     return 0
 
 
