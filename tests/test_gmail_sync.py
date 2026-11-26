@@ -1,7 +1,7 @@
 import base64
 import json
 
-from signalbox.gmail_sync import sync_once
+from signalbox.gmail_sync import sync_once, watch
 from signalbox.loaders import load_json
 
 
@@ -111,3 +111,37 @@ def test_sync_once_fetches_sent_mail_but_never_labels_it(tmp_path):
     _, msgs = load_json(cache_path)
     assert {m.id for m in msgs} == {"ask1", "sent1"}
     assert all(msg_id != "sent1" for msg_id, _ in client.modified)
+
+
+def test_watch_runs_sync_once_per_cycle_and_sleeps_between(tmp_path):
+    client = FakeGmailClient(["ask1"], [], {"ask1": ASK})
+    cache_path = tmp_path / "cache.json"
+    cycles, sleeps = [], []
+
+    watch(lambda: client, cache_path, interval=5, max_iterations=3,
+         on_sync=lambda labeled, err: cycles.append((labeled, err)), sleep=sleeps.append, limit=10)
+
+    assert len(cycles) == 3
+    assert [m.id for m in cycles[0][0]] == ["ask1"]      # labeled on the first cycle
+    assert cycles[1][0] == [] and cycles[2][0] == []     # already labeled after that
+    assert all(err is None for _, err in cycles)
+    assert sleeps == [5, 5]                               # no trailing sleep after the last cycle
+
+
+def test_watch_survives_a_failing_cycle_and_keeps_going(tmp_path):
+    cache_path = tmp_path / "cache.json"
+    calls = []
+
+    def flaky_client_factory():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("token expired")
+        return FakeGmailClient(["ask1"], [], {"ask1": ASK})
+
+    cycles = []
+    watch(flaky_client_factory, cache_path, interval=1, max_iterations=2,
+         on_sync=lambda labeled, err: cycles.append((labeled, err)), sleep=lambda s: None, limit=10)
+
+    assert len(cycles) == 2
+    assert isinstance(cycles[0][1], RuntimeError) and cycles[0][0] == []
+    assert cycles[1][1] is None and [m.id for m in cycles[1][0]] == ["ask1"]

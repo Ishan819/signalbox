@@ -3,10 +3,15 @@
 sync_once() does one pass: pull recent inbox + sent mail into a local Signal JSON cache
 (sent mail builds the relationship graph, same as import-mbox), score the whole cache, and
 apply a "Needs-You" Gmail label to newly-seen inbox messages that score in that tier.
+
+watch() repeats that forever on an interval (default 10 minutes), the way a real Gmail live
+mode runs: a sync error is reported but never kills the loop, same as the LLM-unavailable
+fallback in ask.py — a bad cycle just gets retried next time around.
 """
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from .gmail_api import GmailClient, ensure_label, message_from_gmail
@@ -74,3 +79,25 @@ def sync_once(client: GmailClient, cache_path: str | Path, name: str = "Me", lim
     if not dry_run:
         _save_labeled_ids(state_path, labeled_ids)
     return newly_labeled
+
+
+def watch(client_factory, cache_path: str | Path, interval: float = 600, max_iterations: int | None = None,
+         on_sync=None, sleep=time.sleep, **sync_kwargs) -> None:
+    """Call sync_once every `interval` seconds, forever (or `max_iterations` times, for tests).
+
+    `client_factory` is called fresh each cycle so it can hand back a GmailClient built from a
+    just-refreshed access token. `on_sync(newly_labeled, error)` is called after every cycle,
+    win or lose, so a caller (the CLI) can report progress without the loop depending on it.
+    """
+    i = 0
+    while max_iterations is None or i < max_iterations:
+        error = newly_labeled = None
+        try:
+            newly_labeled = sync_once(client_factory(), cache_path, **sync_kwargs)
+        except Exception as exc:
+            error = exc
+        if on_sync:
+            on_sync(newly_labeled or [], error)
+        i += 1
+        if max_iterations is None or i < max_iterations:
+            sleep(interval)
