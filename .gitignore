@@ -5,3 +5,6 @@ __pycache__/
 me.json
 slack.json
 demo_inbox.json
+gmail_token.json
+gmail_cache.json
+*.labeled.json
